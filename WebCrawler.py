@@ -9,15 +9,31 @@ linksServicos = {
     "marca":"/pePI/servlet/MarcasServletController"
 }
 
-def findXpath(xpath,dom):
-    return BeautifulSoup(etree.tostring(dom.xpath(xpath)[0], pretty_print=True).decode('utf-8'),'html.parser').find('font').get_text(strip=True)
 
+# achar tabela na pagina de marcar usa
+def findTableMarcas(nomeTabela,dom):
+    for i in range(50):
+        try:
+            if findXpath(f'/html/body/form/div[2]/div/div[{i}]/div',dom).find('label').find('font').text.strip() == nomeTabela:
+                return findXpath(f'/html/body/form/div[2]/div/div[{i}]/div/div/table/tbody',dom)
+        except: pass
+    return None
+
+
+#funcao para utilizar o XPATH com o BeautifulSoup
+def findXpath(xpath,dom):
+    return BeautifulSoup(etree.tostring(dom.xpath(xpath)[0], pretty_print=True).decode('utf-8'),'html.parser')
+
+
+#função para extrair os dados de marca de um arquivo HTML
 def extrairDadosMarca(pagina,resposta):
 
-    #
+    #converter pagina para o formato do beautifulsoup4
     soup = BeautifulSoup(pagina, 'html.parser')
     body = soup.find('body')
     dom = etree.HTML(str(body))
+
+
 
     #extrair dados gerais
     table = soup.find_all('table')[1]
@@ -38,21 +54,22 @@ def extrairDadosMarca(pagina,resposta):
         print('Tabela de dados gerais não encontrada...')
 
 
+
     #extrair classificação
     classeNice = findXpath('/html/body/form/div[2]/div/div[3]/div/div/table/tbody/tr/td[1]',dom)
     situacao = findXpath('/html/body/form/div[2]/div/div[3]/div/div/table/tbody/tr/td[2]',dom)
     especificacao = findXpath('/html/body/form/div[2]/div/div[3]/div/div/table/tbody/tr/td[3]',dom)
     classificação = {
-        "classe-nice":classeNice,
-        "situacao":situacao,
-        "especificacao":especificacao
+        "classe-nice":classeNice.find('font').get_text(strip=True),
+        "situacao":situacao.get_text(strip=True),
+        "especificacao":especificacao.get_text(strip=True)
     }
     resposta["classificacao"] = classificação
     
-    return resposta
+
 
     #extrair titulares
-    table = soup.find_all('table')[7]
+    table = findXpath('/html/body/form/div[2]/div/div[4]/div/div/table/tbody',dom)
     linhas = table.find_all("tr")
     titulares = []
     for linha in linhas:
@@ -65,14 +82,27 @@ def extrairDadosMarca(pagina,resposta):
         except: pass
     resposta["titulares"] = titulares
 
+    
 
     #extrair representante legal
-    # OBS: Essa tabela ainda não foi implementada pois faltam dados
+    table = findTableMarcas("Representante Legal",dom)
+    linha = table.find("tr")
+    if linha != None:
+        posicao = linha.find_all('td')[0].text.strip()
+        nome = linha.find_all('td')[1].text.strip()
+        representanteLegal = {
+            "posicao":posicao,
+            "nome":nome
+        }
+        resposta["representante-legal"] = representanteLegal
+    else:
+        resposta["representante-legal"] = {}
+
 
 
     #extrair datas
-    table = soup.find_all('table')[9]
-    linha = table.find_all("tr")[4].find_all("th")
+    table = findXpath('/html/body/form/div[2]/div/div[6]/div/div/table/tbody',dom)
+    linha = table.find("tr").find_all('th')
     datas = {
         "deposito":linha[0].text.strip(),
         "concessao":linha[1].text.strip(),
@@ -80,26 +110,29 @@ def extrairDadosMarca(pagina,resposta):
     }
     resposta["datas"] = datas
 
+    
 
     #extrair prazos para prorrogação
-    table = soup.find_all('table')[12]
-    linhas = table.find_all("tr")
-    prazos = {
-        "Inicio":{
-            "ordinario":linhas[1].find_all("td")[1].text.strip(),
-            "extraordinario":linhas[1].find_all("td")[2].text.strip(),
-        },
-        "Fim":{
-            "ordinario":linhas[2].find_all("td")[1].text.strip(),
-            "extraordinario":linhas[2].find_all("td")[2].text.strip(),
+    table = findTableMarcas("Prazos para prorrogação de registro de marca",dom)
+    if table != None:
+        linhas = table.find_all("tr")
+        prazos = {
+            "Inicio":{
+                "ordinario":linhas[0].find_all("td")[1].text.strip(),
+                "extraordinario":linhas[0].find_all("td")[2].text.strip(),
+            },
+            "Fim":{
+                "ordinario":linhas[1].find_all("td")[1].text.strip(),
+                "extraordinario":linhas[1].find_all("td")[2].text.strip(),
+            }
         }
-    }
-    resposta["prazos"] = prazos
+        resposta["prazos"] = prazos
+
 
 
     #peticoes
-    table = soup.find_all('table')[15]
-    linhas = table.find("tbody").find_all("tr")
+    table = findTableMarcas("Petições",dom)
+    linhas = table.find_all("tr")
     peticoes = []
     for index,i in enumerate(linhas):
         
@@ -117,36 +150,50 @@ def extrairDadosMarca(pagina,resposta):
             "data2":colunas[16].text.strip()            
         })
     resposta["peticoes"] = peticoes
-    
 
-    #publicacoes
-    table = soup.find_all('table')[30].find('tbody').find_all('tr')
+
+
+    #extrair as publicacoes
+    table = findTableMarcas("Publicações",dom)
+    linhas = table.find_all("tr")
     publicacoes = []
     ok = False
-    for index,i in enumerate(table):
+    for index,i in enumerate(linhas):
         
         colunas = i.find_all('td')
         if len(colunas) < 4:
-            continue
-
-        if not ok:
-            ok = not ok
-            for ind,cada in enumerate(colunas):
-                print(f"index - {ind}:",cada.text.strip())
+            continue    
+        
+        if len(colunas) == 10:
+            rpi = colunas[0].text.strip()
+            data_rpi = colunas[1].text.strip()
+            despacho = colunas[2].find('font').text.strip()
+            certificado = colunas[7].get_text(strip=True)
+            interior = colunas[8].find('font').text.strip()
+            complemento_despacho = colunas[9].text.strip()
+        else:
+            rpi = colunas[0].text.strip()
+            data_rpi = colunas[1].text.strip()
+            despacho = colunas[2].find('font').text.strip()
+            certificado = colunas[3].get_text(strip=True)
+            interior = colunas[4].find('font').text.strip()
+            complemento_despacho = colunas[5].text.strip()
 
         publicacoes.append({
-            "rpi":colunas[0].text.strip(),
-            "data-rpi":colunas[1].text.strip(),
-            "despacho":colunas[2].text.strip(),
-            "certificado":colunas[3].text.strip(),
-            "interior":colunas[4].text.strip(),
-            "complemento-despacho":colunas[5].find('font').text.strip()            
+            "rpi":rpi,
+            "data-rpi":data_rpi,
+            "despacho":despacho,
+            "certificado":certificado,
+            "interior":interior,
+            "complemento-despacho":complemento_despacho            
         })
     resposta["publicacoes"] = publicacoes
 
+
     return resposta
 
-def WebCrawler(requestAPI,html=None):
+
+def WebCrawler(requestAPI,cached=False):
 
     resposta = {}
 
@@ -158,8 +205,11 @@ def WebCrawler(requestAPI,html=None):
         print("ERRO: A busca desse servico ainda não foi implementada...")
         return 
 
+    if f"{servico}_{id}.html" not in os.listdir("cache_paginas"):
+        cached = False 
+
     #entrar como convidado
-    if html == None:
+    if not cached:
         session = requests.session()
         session.get("https://busca.inpi.gov.br/pePI/servlet/LoginController?action=login")
 
@@ -178,7 +228,7 @@ def WebCrawler(requestAPI,html=None):
             'Action': 'searchMarca',
             'tipoPesquisa': 'BY_NUM_PROC'
         }
-        if html == None:
+        if not cached:
             pagina = session.post("https://busca.inpi.gov.br" + linksServicos[servico], data=formulario, headers=headers)
 
             #extrair tabela de resultados da pesquisa
@@ -203,21 +253,21 @@ def WebCrawler(requestAPI,html=None):
 
 
         #pegar detalhes da marca
-        if html == None:
+        if not cached:
             pagina = session.post("https://busca.inpi.gov.br" + marca["linkDetalhes"])
             with open("pagina.html","wb") as file:
                 print("gravando pagina de dados...")
                 file.write(pagina.content)
             resposta = extrairDadosMarca(pagina.content,resposta)
         else:
-            with open(html,"r") as file:
+            with open(f"cache_paginas/{servico}_{id}.html","rb") as file:
                 resposta = extrairDadosMarca(file.read(),resposta)
 
     return resposta
 
+
 #marcas testadas: 002489937 - 926148915
 resposta = WebCrawler("marca/002489937")
-print(resposta)
 with open("response.json","w") as file:
     json.dump(resposta,file)
 
