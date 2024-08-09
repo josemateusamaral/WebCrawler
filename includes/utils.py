@@ -3,4 +3,7 @@ from lxml import etree
 
 #funcao para utilizar o XPATH com o BeautifulSoup
 def findXpath(xpath,dom):
-    return BeautifulSoup(etree.tostring(dom.xpath(xpath)[0], pretty_print=True).decode('utf-8'),'html.parser')
+    elemento = dom.xpath(xpath)
+    if not len(elemento):
+        return None
+    return BeautifulSoup(etree.tostring(elemento[0], pretty_print=True).decode('utf-8'),'html.parser')

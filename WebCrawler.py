@@ -16,7 +16,7 @@ linksServicos = {
     "patente":"/pePI/servlet/PatenteServletController"
 }
 
-
+#função principal que recebe a requisicao da API e retorna um dicionario que pode ser convertido em JSON
 def WebCrawler(requestAPI,cached=False):
 
     resposta = {}
@@ -92,19 +92,19 @@ def WebCrawler(requestAPI,cached=False):
     
     elif servico == "patente":
         #fazer um request post para o servidor pedindo a pagina de patentes
-        formulario = {
-            'NumPedido':id,
-            'NumGru': '',
-            'NumProtocolo': '',
-            'FormaPesquisa': '',
-            'ExpressaoPesquisa': '',
-            'Coluna': '',
-            'RegisterPerPage': '20',
-            'Action': 'SearchBasico'
-        }
         linkPatente = None
         if not cached:
 
+            formulario = {
+                'NumPedido':id,
+                'NumGru': '',
+                'NumProtocolo': '',
+                'FormaPesquisa': '',
+                'ExpressaoPesquisa': '',
+                'Coluna': '',
+                'RegisterPerPage': '20',
+                'Action': 'SearchBasico'
+            }
             pagina = session.post("https://busca.inpi.gov.br" + linksServicos[servico], data=formulario,verify=False)
             time.sleep(1)
             with open(f"cache_paginas/{servico}_{id}.html","wb") as file:
@@ -125,8 +125,9 @@ def WebCrawler(requestAPI,cached=False):
                 return resposta
             
         #pegar detalhes da patente
+        print("link patente:",linkPatente)
         if not cached:
-            pagina = session.post("https://busca.inpi.gov.br" + linkPatente)
+            pagina = session.post("https://busca.inpi.gov.br" + linkPatente,verify=False)
             with open(f"cache_paginas/{servico}_{id}.html","wb") as file:
                 file.write(pagina.content)
             resposta = extrairDadosPatente(pagina.content,resposta)
@@ -139,7 +140,7 @@ def WebCrawler(requestAPI,cached=False):
 
 #marcas: 002489937 - 926148915
 #patentes: BR1020230073581
-resposta = WebCrawler("marca/926148915",True)
+resposta = WebCrawler("patente/BR1020230073581",True)
 with open("response.json","w") as file:
     json.dump(resposta,file)
 
