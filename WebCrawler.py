@@ -3,10 +3,14 @@ from bs4 import BeautifulSoup
 import json
 import os
 from lxml import etree
+import time
+import certifi
+
 
 #linkServico
 linksServicos = {
-    "marca":"/pePI/servlet/MarcasServletController"
+    "marca":"/pePI/servlet/MarcasServletController",
+    "patente":"/pePI/servlet/PatenteServletController"
 }
 
 
@@ -24,6 +28,24 @@ def findTableMarcas(nomeTabela,dom):
 def findXpath(xpath,dom):
     return BeautifulSoup(etree.tostring(dom.xpath(xpath)[0], pretty_print=True).decode('utf-8'),'html.parser')
 
+#funcao para extrair os dados de um patente
+def extrairDadosPatente(pagina,resposta):
+    #converter pagina para o formato do beautifulsoup4
+    soup = BeautifulSoup(pagina, 'html.parser')
+    body = soup.find('body')
+    dom = etree.HTML(str(body))
+
+    #extrair dados gerais
+    dadosGerais = {
+        "data-deposito":findXpath("/html/body/form/div[2]/div/table[2]/tbody/tr[3]/td[2]/font",dom).text.strip(),
+        "data-publicacao":findXpath("/html/body/form/div[2]/div/table[2]/tbody/tr[4]/td[2]/font",dom).text.strip(),
+        "data-concecao":findXpath("/html/body/form/div[2]/div/table[2]/tbody/tr[5]/td[2]/font",dom).text.strip(),
+        "nome-depositante":findXpath("/html/body/form/div[2]/div/table[2]/tbody/tr[6]/td[2]/font",dom).text.strip()
+    }
+    resposta["dados-gerais"] = dadosGerais
+
+
+    return resposta
 
 #função para extrair os dados de marca de um arquivo HTML
 def extrairDadosMarca(pagina,resposta):
@@ -32,8 +54,6 @@ def extrairDadosMarca(pagina,resposta):
     soup = BeautifulSoup(pagina, 'html.parser')
     body = soup.find('body')
     dom = etree.HTML(str(body))
-
-
 
     #extrair dados gerais
     table = soup.find_all('table')[1]
@@ -211,15 +231,15 @@ def WebCrawler(requestAPI,cached=False):
     #entrar como convidado
     if not cached:
         session = requests.session()
-        session.get("https://busca.inpi.gov.br/pePI/servlet/LoginController?action=login")
+        proxy = {
+            "http": 'http://207.188.6.20:3128'
+        }
+        session.get("https://busca.inpi.gov.br/pePI/servlet/LoginController?action=login",verify=False)
+        time.sleep(1)
 
     if servico == "marca":
 
         #fazer um request post para o servidor pedindo a pagina de marcas
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Referer': "https://busca.inpi.gov.br" + linksServicos[servico]
-        }
         formulario = {
             'NumPedido': id,
             'NumGRU': '', 
@@ -228,8 +248,10 @@ def WebCrawler(requestAPI,cached=False):
             'Action': 'searchMarca',
             'tipoPesquisa': 'BY_NUM_PROC'
         }
+        marca = {}
         if not cached:
-            pagina = session.post("https://busca.inpi.gov.br" + linksServicos[servico], data=formulario, headers=headers)
+            pagina = session.post("https://busca.inpi.gov.br" + linksServicos[servico], data=formulario,verify=False)
+            time.sleep(1)
 
             #extrair tabela de resultados da pesquisa
             soup = BeautifulSoup(pagina.content, 'html.parser')
@@ -255,7 +277,7 @@ def WebCrawler(requestAPI,cached=False):
         #pegar detalhes da marca
         if not cached:
             pagina = session.post("https://busca.inpi.gov.br" + marca["linkDetalhes"])
-            with open("pagina.html","wb") as file:
+            with open(f"cache_paginas/{servico}_{id}.html","wb") as file:
                 print("gravando pagina de dados...")
                 file.write(pagina.content)
             resposta = extrairDadosMarca(pagina.content,resposta)
@@ -263,11 +285,64 @@ def WebCrawler(requestAPI,cached=False):
             with open(f"cache_paginas/{servico}_{id}.html","rb") as file:
                 resposta = extrairDadosMarca(file.read(),resposta)
 
+    
+    elif servico == "patente":
+        #fazer um request post para o servidor pedindo a pagina de patentes
+        formulario = {
+            'NumPedido':id,
+            'NumGru': '',
+            'NumProtocolo': '',
+            'FormaPesquisa': '',
+            'ExpressaoPesquisa': '',
+            'Coluna': '',
+            'RegisterPerPage': '20',
+            'Action': 'SearchBasico'
+        }
+        linkPatente = None
+        if not cached:
+
+            pagina = session.post("https://busca.inpi.gov.br" + linksServicos[servico], data=formulario,verify=False)
+            time.sleep(1)
+            with open(f"cache_paginas/{servico}_{id}.html","wb") as file:
+                file.write(pagina.content)            
+
+            #extrair tabela de resultados da pesquisa
+            soup = BeautifulSoup(pagina.content, 'html.parser')
+            body = soup.find('body')
+            dom = etree.HTML(str(body))
+            for i in soup.find_all('table')[0].find_all('font'):
+                a = i.find('a')
+                if a != None and a.text.strip() not in ["Início","Base Patentes"]:
+                    linkPatente = a.get('href')
+                    break
+
+            if linkPatente == None:
+                print("ERRO: Patente não encontrada...")
+                return resposta
+            
+        #pegar detalhes da patente
+        if not cached:
+            pagina = session.post("https://busca.inpi.gov.br" + linkPatente)
+            with open(f"cache_paginas/{servico}_{id}.html","wb") as file:
+                file.write(pagina.content)
+            resposta = extrairDadosPatente(pagina.content,resposta)
+        else:
+            with open(f"cache_paginas/{servico}_{id}.html","rb") as file:
+                resposta = extrairDadosPatente(file.read(),resposta)
+            
+
+
+
+
     return resposta
 
 
-#marcas testadas: 002489937 - 926148915
-resposta = WebCrawler("marca/002489937")
+#marcas: 002489937 - 926148915
+#patentes: BR1020230073581
+resposta = WebCrawler("patente/BR1020230073581",True)
 with open("response.json","w") as file:
     json.dump(resposta,file)
+
+
+
 
