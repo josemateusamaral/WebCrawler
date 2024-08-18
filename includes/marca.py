@@ -1,5 +1,6 @@
 from bs4 import BeautifulSoup
 from lxml import etree
+import time
 from includes.utils import *
 
 # achar tabela na pagina de marcar usa
@@ -171,5 +172,54 @@ def extrairDadosMarca(pagina,resposta):
         })
     resposta["publicacoes"] = publicacoes
 
+
+    return resposta
+
+def consultarMarca(resposta,cached,session,linksServicos,servico,id):
+    #fazer um request post para o servidor pedindo a pagina de marcas
+    formulario = {
+        'NumPedido': id,
+        'NumGRU': '', 
+        'NumProtocolo': '', 
+        'NumInscricaoInternacional': '', 
+        'Action': 'searchMarca',
+        'tipoPesquisa': 'BY_NUM_PROC'
+    }
+    marca = {}
+    if not cached:
+        pagina = session.post("https://busca.inpi.gov.br" + linksServicos[servico], data=formulario,verify=False)
+        time.sleep(1)
+
+        #extrair tabela de resultados da pesquisa
+        soup = BeautifulSoup(pagina.content, 'html.parser')
+        tabela_resultados = soup.find('table', width='780')
+        marca = {}
+        if tabela_resultados:
+            linhas = tabela_resultados.find_all('tr')[1:]
+            for linha in linhas:
+                celulas = linha.find_all('td')
+                if len(celulas) >= 8:
+                    marca["numero"] = celulas[0].text.strip()
+                    marca["linkDetalhes"] = celulas[0].find('a')['href'] if celulas[0].find('a') else None
+                    marca["prioridade"] = celulas[1].text.strip()
+                    marca["marca"] = celulas[3].text.strip()
+                    marca["situacao"] = celulas[5].text.strip()
+                    marca["titular"] = celulas[6].text.strip()
+                    marca["classe"] = celulas[7].text.strip()
+        if marca == {}:
+            print("ERRO: Marca não encontrada...")
+            return
+
+
+    #pegar detalhes da marca
+    if not cached:
+        pagina = session.post("https://busca.inpi.gov.br" + marca["linkDetalhes"])
+        with open(f"cache_paginas/{servico}_{id}.html","wb") as file:
+            print("gravando pagina de dados...")
+            file.write(pagina.content)
+        resposta = extrairDadosMarca(pagina.content,resposta)
+    else:
+        with open(f"cache_paginas/{servico}_{id}.html","rb") as file:
+            resposta = extrairDadosMarca(file.read(),resposta)
 
     return resposta
